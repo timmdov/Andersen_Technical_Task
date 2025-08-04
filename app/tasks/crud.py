@@ -1,38 +1,62 @@
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from app.tasks.models import Task, TaskStatus
-
+from app.tasks.schemas import TaskCRUDResult
+from sqlalchemy.exc import IntegrityError
 
 class TaskCRUD:
 
     def get_all_tasks(self, db: Session, skip: int = 0, limit: int = 100) -> List[Task]:
         return db.query(Task).offset(skip).limit(limit).all()
-    def get_user_tasks(self, db: Session, user_id: int, skip: int = 0, limit: int = 100) -> List[Task]:
-        return db.query(Task).filter(Task.user_id == user_id).offset(skip).limit(limit).all()
+
+    def get_user_tasks(self, db: Session, user_id: int, status: Optional[TaskStatus] = None, skip: int = 0, limit: int = 100):
+        query = db.query(Task).filter(Task.user_id == user_id)
+        if status is not None:
+            query = query.filter(Task.status == status)
+        return query.offset(skip).limit(limit).all()
+
     def get_task_by_id(self, db: Session, task_id: int) -> Optional[Task]:
-        return db.query(Task).filter(Task.id == task_id).first()
-    def create_task(self, db: Session, title: str, user_id: int, description: Optional[str] = None,
-                    status: TaskStatus = TaskStatus.NEW) -> Task:
+        return db.get(Task, task_id)
+
+    def get_tasks_by_status(self, db: Session, status: TaskStatus, skip: int = 0, limit: int = 100) -> List[Task]:
+        return db.query(Task).filter(Task.status == status).offset(skip).limit(limit).all()
+
+    def create_task(self, db: Session, title: str, user_id: int, description: Optional[str] = None, status: TaskStatus = TaskStatus.NEW) -> Tuple[Optional[Task], TaskCRUDResult]:
+
         db_task = Task(
             title=title,
             description=description,
             status=status,
             user_id=user_id
         )
-        db.add(db_task)
-        db.commit()
-        db.refresh(db_task)
-        return db_task
 
-    def update_task(self, db: Session, task_id: int, user_id: int, title: Optional[str] = None, description: Optional[str] = None, status: Optional[TaskStatus] = None) -> Optional[Task]:
+        try:
+            db.add(db_task)
+            db.commit()
+            db.refresh(db_task)
+            return db_task, TaskCRUDResult.SUCCESS
 
-        task = db.query(Task).filter(Task.id == task_id).first()
+        except IntegrityError as e:
+            db.rollback()
+            error_message = str(e).lower()
+            if "foreign key constraint" in error_message or "violates foreign key" in error_message:
+                return None, TaskCRUDResult.NOT_FOUND
+            else:
+                return None, TaskCRUDResult.VALIDATION_ERROR
+
+        except Exception:
+            db.rollback()
+            raise
+
+    def update_task(self, db: Session, task_id: int, user_id: int, title: Optional[str] = None, description: Optional[str] = None, status: Optional[TaskStatus] = None,) -> Tuple[Optional[Task], TaskCRUDResult]:
+
+        task = db.get(Task, task_id)
 
         if not task:
-            return None
+            return None, TaskCRUDResult.NOT_FOUND
 
         if task.user_id != user_id:
-            return None
+            return None, TaskCRUDResult.ACCESS_DENIED
 
         if title is not None:
             task.title = title
@@ -41,22 +65,30 @@ class TaskCRUD:
         if status is not None:
             task.status = status
 
-        db.commit()
-        db.refresh(task)
-        return task
+        try:
+            db.commit()
+            db.refresh(task)
+            return task, TaskCRUDResult.SUCCESS
+        except Exception:
+            db.rollback()
+            raise
 
-    def delete_task(self, db: Session, task_id: int, user_id: int) -> bool:
+    def delete_task(self, db: Session, task_id: int, user_id: int) -> Tuple[bool, TaskCRUDResult]:
 
-        task = db.query(Task).filter(Task.id == task_id).first()
+        task = db.get(Task, task_id)
 
         if not task:
-            return False
+            return False, TaskCRUDResult.NOT_FOUND
 
         if task.user_id != user_id:
-            return False
+            return False, TaskCRUDResult.ACCESS_DENIED
 
-        db.delete(task)
-        db.commit()
-        return True
+        try:
+            db.delete(task)
+            db.commit()
+            return True, TaskCRUDResult.SUCCESS
+        except Exception:
+            db.rollback()
+            raise
 
 task_crud = TaskCRUD()

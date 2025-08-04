@@ -2,7 +2,6 @@ from __future__ import annotations
 from pathlib import Path
 from datetime import timedelta
 from typing import List
-
 from pydantic import SecretStr, Field, ConfigDict
 from pydantic_settings import BaseSettings
 

@@ -1,25 +1,25 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
+from typing import Optional, List, Generic, TypeVar
 from enum import Enum
 
+T = TypeVar('T')
+
 class TaskCRUDResult(str, Enum):
-    SUCCESS = "success"
-    NOT_FOUND = "not_found"
-    ACCESS_DENIED = "access_denied"
-    VALIDATION_ERROR = "validation_error"
+    SUCCESS = "SUCCESS"
+    NOT_FOUND = "NOT_FOUND"
+    ACCESS_DENIED = "ACCESS_DENIED"
+    VALIDATION_ERROR = "VALIDATION_ERROR"
 
 class TaskStatus(str, Enum):
-    NEW = "New"
-    IN_PROGRESS = "In Progress"
-    COMPLETED = "Completed"
-
+    NEW = "NEW"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
 
 class TaskBase(BaseModel):
-    title: str = Field(..., min_length=1, max_length=200, description="Task title")
-    description: Optional[str] = Field(None, max_length=1000, description="Task description")
-    status: TaskStatus = Field(default=TaskStatus.NEW, description="Task status")
+    title: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=1000)
+    status: TaskStatus = Field(default=TaskStatus.NEW)
     model_config = ConfigDict(extra="forbid")
-
 
 class TaskCreate(TaskBase):
     pass
@@ -30,15 +30,17 @@ class TaskUpdate(BaseModel):
     status: Optional[TaskStatus] = None
     model_config = ConfigDict(extra="forbid")
 
-
 class TaskResponse(TaskBase):
-    id: int = Field(..., description="Task ID")
-    user_id: int = Field(..., description="ID of the user who owns this task")
+    id: int = Field(...)
+    user_id: int = Field(...)
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
-
-class TaskListResponse(BaseModel):
-    tasks: list[TaskResponse]
-    total: int
-    page: int = Field(1, ge=1)
-    size: int = Field(20, ge=1)
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: List[T] = Field(...)
+    total: int = Field(...)
+    page: int = Field(..., ge=1)
+    pages: int = Field(..., ge=0)
+    size: int = Field(..., ge=1)
+    has_next: bool = Field(...)
+    has_prev: bool = Field(...)
+    model_config = ConfigDict(from_attributes=True)

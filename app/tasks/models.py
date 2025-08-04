@@ -1,23 +1,15 @@
-import enum
+from app.tasks.schemas import TaskStatus
 from sqlalchemy import Column, Integer, String, Text, Enum, ForeignKey
 from sqlalchemy.orm import relationship
 from app.db.base import Base
-
-
-class TaskStatus(enum.Enum):
-    NEW = "New"
-    IN_PROGRESS = "In Progress"
-    COMPLETED = "Completed"
-
 
 class Task(Base):
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True)
-
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
-    status = Column(Enum(TaskStatus), default=TaskStatus.NEW, nullable=False)
+    status = Column(Enum(TaskStatus, name="taskstatus", create_type=False), default=TaskStatus.NEW, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     owner = relationship("User", back_populates="tasks")

@@ -1,0 +1,7 @@
+There should be no spaces before or after "="
+
+SECRET_KEY=<>
+ALGORITHM=<>
+ACCESS_TOKEN_EXPIRE_MINUTES=<>
+DATABASE_URL=<postgresql://user:password@localhost:5432/db>
+

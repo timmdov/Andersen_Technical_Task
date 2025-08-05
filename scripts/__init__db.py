@@ -9,9 +9,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def main():
-    logger.info("Creating database tables (if they don't exist)...")
+    logger.info("Database tables creation")
     Base.metadata.create_all(bind=engine)
-    logger.info("Done. Tables should now exist.")
+    logger.info("Tables created")
 
 if __name__ == "__main__":
     main()

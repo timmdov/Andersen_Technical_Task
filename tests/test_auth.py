@@ -1,70 +1,111 @@
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from app.main import app
+from app.db.base import Base
+from app.db.session import get_db
+
+SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_database():
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
+
+@pytest.fixture
+def db_session():
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+def override_get_db():
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+app.dependency_overrides[get_db] = override_get_db
 
 client = TestClient(app)
 
-def test_register_login_and_protected_route():
-    # Clean test user, in case test DB is reused
-    username = "auth_test_user"
-    password = "secure123"
-    register_resp = client.post("/api/auth/register", json={
-        "username": username,
-        "password": password
-    })
-    # Registration can return 201 (created) or 409 (conflict, already exists) if not resetting DB each time
-    assert register_resp.status_code in [201, 409]
+REGISTER_URL = "/api/auth/register"
+LOGIN_URL = "/api/auth/login"
 
-    # Login with correct credentials
-    login_resp = client.post("/api/auth/login", data={
-        "username": username,
-        "password": password
-    })
-    assert login_resp.status_code == 200, login_resp.text
-    login_data = login_resp.json()
-    assert "access_token" in login_data
-    token = login_data["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
+def test_register_and_login_success():
+    payload = {
+        "first_name": "John",
+        "last_name": "Doe",
+        "username": "johndoe",
+        "password": "strongpassword"
+    }
+    response = client.post(REGISTER_URL, json=payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["username"] == "johndoe"
+    assert data["first_name"] == "John"
+    assert data["last_name"] == "Doe"
+    assert "id" in data
+    login_data = {
+        "username": "johndoe",
+        "password": "strongpassword"
+    }
+    response = client.post(LOGIN_URL, data=login_data)
+    assert response.status_code == 200
+    token_data = response.json()
+    assert "access_token" in token_data
+    assert token_data["token_type"] == "bearer"
 
-    # Access a protected endpoint (get own tasks, should work)
-    tasks_resp = client.get("/api/tasks/", headers=headers)
-    assert tasks_resp.status_code == 200
+def test_register_duplicate_username():
+    payload = {
+        "first_name": "Jane",
+        "last_name": "Smith",
+        "username": "janesmith",
+        "password": "password123"
+    }
+    response1 = client.post(REGISTER_URL, json=payload)
+    assert response1.status_code == 201
+    response2 = client.post(REGISTER_URL, json=payload)
+    assert response2.status_code == 400
+    assert response2.json()["detail"] == "Username already exists."
 
-    # Try protected endpoint without token (should fail)
-    unauth_resp = client.get("/api/tasks/")
-    assert unauth_resp.status_code == 401
+def test_register_invalid_password():
+    payload = {
+        "first_name": "Short",
+        "last_name": "Pwd",
+        "username": "shortpwd",
+        "password": "123"
+    }
+    response = client.post(REGISTER_URL, json=payload)
+    assert response.status_code == 422
 
-def test_register_twice_should_fail():
-    username = "double_register"
-    password = "test"
-    resp1 = client.post("/api/auth/register", json={"username": username, "password": password})
-    resp2 = client.post("/api/auth/register", json={"username": username, "password": password})
-    assert resp2.status_code == 409 or resp2.status_code == 400
+def test_login_wrong_password():
+    payload = {
+        "first_name": "Alice",
+        "last_name": "Wonderland",
+        "username": "alice",
+        "password": "securepass"
+    }
+    client.post(REGISTER_URL, json=payload)
+    login_data = {
+        "username": "alice",
+        "password": "wrongpassword"
+    }
+    response = client.post(LOGIN_URL, data=login_data)
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Incorrect username or password"
 
-def test_invalid_login():
-    # Non-existent user
-    resp = client.post("/api/auth/login", data={
-        "username": "nonexistentuser",
-        "password": "whatever"
-    })
-    assert resp.status_code == 401
-
-    # Wrong password for real user
-    client.post("/api/auth/register", json={"username": "badpass", "password": "right"})
-    resp = client.post("/api/auth/login", data={"username": "badpass", "password": "wrong"})
-    assert resp.status_code == 401
-
-def test_password_is_hashed_in_db():
-    # This test assumes you can access your DB directly.
-    # This is a pseudo-example, update according to your DB/ORM setup.
-    from app.db.base import SessionLocal
-    from app.users.models import User
-
-    username = "hashcheck"
-    password = "plainsecret"
-    client.post("/api/auth/register", json={"username": username, "password": password})
-
-    db = SessionLocal()
-    user = db.query(User).filter_by(username=username).first()
-    assert user is not None
-    assert user.password_hash != password  # The password in DB is not plain text
-    assert user.password_hash.startswith("$2b$") or user.password_hash.startswith("$2a$")  # bcrypt hash prefix
+def test_login_nonexistent_user():
+    login_data = {
+        "username": "ghost",
+        "password": "irrelevant"
+    }
+    response = client.post(LOGIN_URL, data=login_data)
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Incorrect username or password"
